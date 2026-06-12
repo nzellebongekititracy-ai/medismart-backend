@@ -13,8 +13,14 @@ CORS(app)
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'final_distress_model.onnx')
 SCALER_PATH = os.path.join(os.path.dirname(__file__), 'data_scaler.pkl')
 
-# Load the lightweight ONNX runtime inference session and the scaler
-session = ort.InferenceSession(MODEL_PATH)
+# SAFE MULTI-THREADING ENGINE CONFIGURATION FOR GUNICORN (Fixes Code 139)
+opts = ort.SessionOptions()
+opts.intra_op_num_threads = 1
+opts.inter_op_num_threads = 1
+opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+
+# Load inference session with safe execution configurations
+session = ort.InferenceSession(MODEL_PATH, sess_options=opts)
 scaler = joblib.load(SCALER_PATH)
 input_name = session.get_inputs()[0].name
 
@@ -36,12 +42,11 @@ def predict():
         else:
             input_df = pd.DataFrame(input_data, columns=['hr', 'spo2', 'temp'])
             
-        scaled_input = scaler.transform(input_df) # Result is shape (1, 3)
+        scaled_input = scaler.transform(input_df)
         
-        # 2. MATCH THE LSTM TIMESTEPS (Shape transformation to 1, 10, 3)
-        # We repeat the scaled vitals 10 times to create the sequence window expected by your model
-        sequence_input = np.repeat(scaled_input, 10, axis=0) # Shape becomes (10, 3)
-        final_input = np.reshape(sequence_input, (1, 10, 3)).astype(np.float32) # Perfect (1, 10, 3) Match!
+        # 2. Match the exact 10 timesteps required by your LSTM network
+        sequence_input = np.repeat(scaled_input, 10, axis=0) 
+        final_input = np.reshape(sequence_input, (1, 10, 3)).astype(np.float32)
 
         # 3. Run the prediction through the ONNX execution engine
         prediction = session.run(None, {input_name: final_input})
