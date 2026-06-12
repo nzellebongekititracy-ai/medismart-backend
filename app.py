@@ -13,16 +13,8 @@ CORS(app)
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'final_distress_model.onnx')
 SCALER_PATH = os.path.join(os.path.dirname(__file__), 'data_scaler.pkl')
 
-# SAFE MULTI-THREADING ENGINE CONFIGURATION FOR GUNICORN (Fixes Code 139)
-opts = ort.SessionOptions()
-opts.intra_op_num_threads = 1
-opts.inter_op_num_threads = 1
-opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-
-# Load inference session with safe execution configurations
-session = ort.InferenceSession(MODEL_PATH, sess_options=opts)
+# Load the scaler globally
 scaler = joblib.load(SCALER_PATH)
-input_name = session.get_inputs()[0].name
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -48,11 +40,20 @@ def predict():
         sequence_input = np.repeat(scaled_input, 10, axis=0) 
         final_input = np.reshape(sequence_input, (1, 10, 3)).astype(np.float32)
 
-        # 3. Run the prediction through the ONNX execution engine
+        # 3. Initialize ONNX runtime inside the worker process to avoid Code 139 memory clashes
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = 1
+        opts.inter_op_num_threads = 1
+        opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        
+        session = ort.InferenceSession(MODEL_PATH, sess_options=opts)
+        input_name = session.get_inputs()[0].name
+
+        # 4. Run the prediction through the ONNX execution engine
         prediction = session.run(None, {input_name: final_input})
         probability = float(prediction[0][0][0])
         
-        # 4. Determine classification threshold
+        # 5. Determine classification threshold
         status = "Distress" if probability > 0.5 else "Stable"
 
         return jsonify({
