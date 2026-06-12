@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import onnxruntime as ort
 import numpy as np
+import pandas as pd  # Imported to handle MinMaxScaler feature names
 import joblib
 import os 
 
@@ -25,13 +26,19 @@ def predict():
     try:
         # Extract vital signs sent from the request body
         data = request.json
-        hr = data['hr']
-        spo2 = data['spo2']
-        temp = data['temp']
+        hr = float(data['hr'])
+        spo2 = float(data['spo2'])
+        temp = float(data['temp'])
 
-        # 1. Structure the raw data into a 2D numpy array for scaling
-        input_data = np.array([[hr, spo2, temp]], dtype=np.float32)
-        scaled_input = scaler.transform(input_data)
+        # 1. Structure the raw data into a DataFrame with matching feature names for scaling
+        input_df = pd.DataFrame([{
+            'hr': hr,
+            'spo2': spo2,
+            'temp': temp
+        }])
+        
+        # Scale the data using the named DataFrame columns
+        scaled_input = scaler.transform(input_df)
         
         # 2. Reshape the array to match the LSTM time-series input format:
         # (batch_size = 1, timesteps = 1, features = 3)
